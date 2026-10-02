@@ -1,0 +1,13 @@
+server {
+    listen ${PORT};
+    server_name _;
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # Never serve repository internals
+    location ~ /\. { deny all; }
+
+    location / {
+        try_files $uri $uri/ $uri.html =404;
+    }
+}

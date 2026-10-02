@@ -1,0 +1,18 @@
+{
+  "name": "worldskills-deploy-platform",
+  "version": "1.0.0",
+  "private": true,
+  "description": "National WorldSkills Web Technologies git-push-to-deploy platform",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning src/server.js"
+  },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "http-proxy": "^1.18.1",
+    "mysql2": "^3.11.5"
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "name": "React (Vite)",
+  "description": "React 18 + Vite. Ships a real production build (minified bundle) served by nginx on $PORT - never a dev server.",
+  "order": 3
+}

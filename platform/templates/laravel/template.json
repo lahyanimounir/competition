@@ -1,0 +1,6 @@
+{
+  "name": "Laravel",
+  "description": "Latest Laravel on PHP 8.3 + Apache. Pre-filled .env.production with this repository's own database, generated APP_KEY, migrations on every deploy.",
+  "scaffold": "laravel",
+  "order": 4
+}

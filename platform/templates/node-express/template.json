@@ -1,0 +1,5 @@
+{
+  "name": "Node.js / Express",
+  "description": "Express REST API on Node 20. Reads $PORT, binds 0.0.0.0, CORS enabled, MySQL client included.",
+  "order": 2
+}

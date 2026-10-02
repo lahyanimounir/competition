@@ -1,0 +1,73 @@
+name: worldskills
+
+# National WorldSkills Deployment Platform
+# Everything runs on ONE server machine. Other machines only need a browser + git.
+# Configure via .env (copy .env.example or run scripts/setup.ps1).
+
+services:
+  platform:
+    build: ./platform
+    container_name: ws-platform
+    restart: unless-stopped
+    ports:
+      - "${HTTP_PORT:-80}:80"
+    environment:
+      BASE_DOMAIN: ${BASE_DOMAIN:?Set BASE_DOMAIN in .env}
+      PUBLIC_PORT: ${HTTP_PORT:-80}
+      ADMIN_CODE: ${ADMIN_CODE:?Set ADMIN_CODE in .env}
+      MYSQL_HOST: ws-mysql
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD in .env}
+      MYSQL_PUBLIC_PORT: ${MYSQL_PORT:-3306}
+      BUILD_CONCURRENCY: ${BUILD_CONCURRENCY:-2}
+      IDLE_MINUTES: ${IDLE_MINUTES:-30}
+      NPM_MAXSOCKETS: ${NPM_MAXSOCKETS:-}
+      DOCKER_NETWORK: worldskills_net
+    # Linux with SELinux (Fedora/RHEL): allow this container to use the Docker socket.
+    # No effect on Windows/Docker Desktop or Linux without SELinux.
+    security_opt:
+      - label:disable
+    volumes:
+      # The platform drives the host's Docker engine to build and run competitor apps.
+      - /var/run/docker.sock:/var/run/docker.sock
+      - platform-data:/data
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks: [wsnet]
+
+  mysql:
+    image: mysql:8.0
+    container_name: ws-mysql
+    restart: unless-stopped
+    # max_connections: every deployed app holds its own connections (200 competitors x several repos)
+    command: ["--default-authentication-plugin=mysql_native_password", "--max-connections=2000"]
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+    ports:
+      - "${MYSQL_PORT:-3306}:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    networks: [wsnet]
+
+  phpmyadmin:
+    image: phpmyadmin:5
+    container_name: ws-phpmyadmin
+    restart: unless-stopped
+    environment:
+      PMA_HOST: ws-mysql
+      UPLOAD_LIMIT: 64M
+    depends_on: [mysql]
+    networks: [wsnet]
+
+networks:
+  wsnet:
+    name: worldskills_net
+
+volumes:
+  platform-data:
+  mysql-data:

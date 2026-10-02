@@ -1,0 +1,5 @@
+{
+  "name": "Static HTML / CSS / JS",
+  "description": "Plain HTML, CSS and JavaScript served by nginx on $PORT. No PHP, no build step, no framework - edit index.html and push.",
+  "order": 0
+}

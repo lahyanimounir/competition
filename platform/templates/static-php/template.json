@@ -1,0 +1,5 @@
+{
+  "name": "Static HTML/CSS/JS + PHP",
+  "description": "Apache + PHP 8.3 with pdo_mysql and pdo_sqlite compiled in. Static files and .php files go in public/.",
+  "order": 1
+}
