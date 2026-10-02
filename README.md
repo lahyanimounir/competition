@@ -345,6 +345,31 @@ Trainer access is read-only for code: trainers do not push into a competitor's r
     per staff account – it tries every possible code against the stored fingerprint). **Git
     passwords cannot be recovered** (long random strings): click **Rotate git** to issue a new one.
   * Competitors can also re-show their own git password on their dashboard at any time.
+* **Timer** – the competition countdown, controlled **only by administrators**:
+  * set a **title** (e.g. "Module A – Speed test") and a **duration** in minutes, then **Start**,
+    **Pause / Resume**, **Reset** (optionally also clearing all extra time);
+  * **+5 min / −5 min everyone** adjusts the running (or paused) timer for all competitors;
+  * **Extra time per competitor**: +5 min, +10 min, *Other…* (any minutes, negative to remove) or
+    **Clear**. Only that competitor's countdown is extended; the table shows each competitor's time left.
+  * Every action is written to the audit log.
+
+  Where the timer is shown:
+  * **Public screen, no login:** `http://<SERVER-IP>.nip.io/timer` – put it full-screen (F11) on a
+    projector/TV. Huge countdown with the title and status (*Not started / Running / Paused /
+    Time is up*); it turns amber in the last 10 minutes and red at the end. Competitors with extra time
+    are listed with their **own** countdown (only their name and extra minutes are shown).
+  * **Each competitor's dashboard** shows their countdown, including their extra time
+    ("Includes +10 min extra time for you").
+  * All screens synchronise with the **server's clock**, so a laptop or TV with a wrong clock still
+    shows the right time, and they keep counting if the network drops for a moment.
+  * The timer does not block pushes when time is up (competitors can still push; the push history
+    shows the time of every push).
+* **Trainer locations** – set each trainer to **On the floor**, **In the marking room** or **Off duty**
+  with one click (only administrators can change it; it is written to the audit log).
+  The **public board** at `http://<SERVER-IP>.nip.io/board` shows who is where, **without login** –
+  open it full-screen on a TV/projector in the room (F11). It refreshes every 5 seconds, shows a clock,
+  and only ever shows trainer names and locations (no competitors, no other data). If the server
+  cannot be reached it keeps the last view and says so.
 * **Templates** – enable/disable templates. Templates live in `platform/templates/<id>/`
   (`template.json` + `files/`). Tokens such as `__WS_DB_NAME__`, `__WS_APP_URL__`, `__WS_APP_KEY__`
   are filled in per repository. After adding a template run `docker compose up -d --build`.
@@ -594,6 +619,12 @@ values appear in the table.
   The old database tables (`modules`, `assignments`, `rubric_criteria`, `assessments`,
   `assessment_scores`) are left in place, unused, so no data was deleted. Unknown `/api/...` paths now
   answer 404.
+* **Competition timer:** Administration → Timer (title, duration, start/pause/resume/reset, ±5 min for
+  everyone, extra time per competitor), public no-login screen at `/timer` (`GET /api/public/timer`),
+  countdown on each competitor's dashboard; clocks synchronised to the server.
+* **Trainer locations + public board:** Administration → Trainer locations (On the floor / In the
+  marking room / Off duty) and a no-login board at `/board` for a screen in the room
+  (`GET /api/public/board` returns only trainer names, locations and since-times).
 * **Windows and Linux server setup.** New `scripts/setup.sh` for Linux (Docker checks, IP detection,
   secrets, `--firewall` for ufw/firewalld, `--start`); `scripts/setup.ps1` for Windows upgraded the same
   way (`-Firewall`, `-Start`, `-Force`, starts Docker Desktop if needed, port-conflict warning). Section 3

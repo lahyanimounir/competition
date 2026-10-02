@@ -20,6 +20,9 @@ app.use('/git', git.smartHttp(async (repo, sha, user) => {
 }));
 
 app.use('/api', express.json({ limit: '5mb' }), api);
+// Public trainer-location board (no login), e.g. for a screen in the competition room
+app.get('/timer', (req, res) => res.sendFile('timer.html', { root: config.PUBLIC_DIR }));
+app.get('/board', (req, res) => res.sendFile('board.html', { root: config.PUBLIC_DIR }));
 app.use(express.static(config.PUBLIC_DIR, { index: 'index.html' }));
 app.get('*', (req, res) => res.sendFile('index.html', { root: config.PUBLIC_DIR }));
 

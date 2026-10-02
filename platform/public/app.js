@@ -129,6 +129,25 @@ function mountPushFeed(el, { limit = 30 } = {}) {
   every(5000, load);
 }
 
+// ---- competition timer ------------------------------------------------------
+// t = timer state from the server; offset = server clock minus this device's clock
+const fmtClock = (sec) => {
+  sec = Math.max(0, Math.floor(sec));
+  return [Math.floor(sec / 3600), Math.floor((sec % 3600) / 60), sec % 60].map((n) => String(n).padStart(2, '0')).join(':');
+};
+const clockOffset = (t, sentAt) => (t && t.serverNow ? Date.parse(t.serverNow) - (sentAt + Date.now()) / 2 : 0);
+function timerLeft(t, offset, extraSec = 0) {
+  if (!t) return 0;
+  const base = t.status === 'running' ? (Date.parse(t.endsAt) - (Date.now() + offset)) / 1000 : t.remainingSec;
+  return base + extraSec;
+}
+function timerStatus(t, leftSec) {
+  if (t.status === 'idle') return ['Not started', 'awaiting'];
+  if (leftSec <= 0) return ['Time is up', 'failed'];
+  if (t.status === 'paused') return ['Paused', 'queued'];
+  return ['Running', 'running'];
+}
+
 // Assessment marks (no score / rank, trainer-only): per repository and per trainer.
 // The competitor's status is derived: assessed when every repository has at least one trainer's mark.
 function assessPill(a) {
@@ -269,6 +288,7 @@ async function renderDashboard(userId) {
     ${!isSelf ? `<div class="banner info" style="margin-bottom:16px">Acting on <b>${esc(d.competitor.name)}</b>'s account as ${esc(state.me.role)}.
       <a href="#/trainer/${d.competitor.id}">Open trainer view →</a></div>` : ''}
     <div id="secret-banner"></div>
+    ${isSelf ? '<div id="timer-card"></div>' : ''}
     <div class="spread"><div><h1>${isSelf ? `Welcome, ${esc(d.competitor.name)}` : esc(d.competitor.name)}</h1>
       <p class="muted">Push to <code>main</code> to deploy. Every repository gets its own container, database and subdomain.</p></div></div>
     <div id="announcements"></div>
@@ -326,6 +346,24 @@ async function renderDashboard(userId) {
   }
 
   mountPushFeed($('#push-feed'));
+  if (isSelf) {
+    // Own countdown: shared timer + this competitor's extra time, ticking locally between refreshes
+    const offset = clockOffset(d.timer, Date.now());
+    const tickTimer = () => {
+      const el = $('#timer-card');
+      if (!el || !d.timer) return;
+      const t = d.timer;
+      const leftSec = timerLeft(t, offset, t.extraSeconds || 0);
+      const [label, cls] = timerStatus(t, leftSec);
+      el.innerHTML = `<div class="card timer-card section"><div><div class="small muted">${esc(t.title)}</div>
+        <div class="countdown ${cls}">${t.status !== 'idle' && leftSec <= 0 ? 'Time is up' : fmtClock(Math.ceil(leftSec))}</div>
+        ${t.extraSeconds ? `<div class="small">Includes <b>+${Math.round(t.extraSeconds / 60)} min</b> extra time for you</div>` : ''}</div>
+        ${pill({ state: cls, label })}</div>`;
+    };
+    // (the dashboard's own 4-second refresh replaces `d`, so pauses / extra time show up automatically)
+    tickTimer();
+    every(500, tickTimer);
+  }
   $('#announcements').innerHTML = d.announcements.length ? `<div class="card section"><h2>Announcements</h2>${d.announcements.map((a) =>
     `<div style="padding:8px 0;border-top:1px solid var(--border)"><div class="prewrap">${esc(a.body)}</div><div class="small muted">${esc(a.author || '')} · ${ago(a.created_at)}</div></div>`).join('')}</div>` : '';
 
@@ -952,9 +990,124 @@ async function renderCompetitor(userId) {
 // ---------------------------------------------------------------------------
 async function renderAdmin(tab) {
   app.innerHTML = `<h1>Administration</h1><p class="muted">Accounts, templates, infrastructure and platform-wide activity.</p>
-    ${tabs(tab, [['users', 'Accounts'], ['templates', 'Templates'], ['infra', 'Infrastructure'], ['activity', 'Activity']])}<div id="tab"></div>`;
+    ${tabs(tab, [['users', 'Accounts'], ['timer', 'Timer'], ['locations', 'Trainer locations'], ['templates', 'Templates'], ['infra', 'Infrastructure'], ['activity', 'Activity']])}<div id="tab"></div>`;
   bindTabs('#/admin');
   const el = $('#tab');
+
+  if (tab === 'timer') {
+    let t = null;
+    let offset = 0;
+    const act = async (action, body) => {
+      try { await api('POST', `/api/admin/timer/${action}`, body || {}); await load(); } catch (err) { fail(err); }
+    };
+    const extra = async (id, body) => { try { await api('PUT', `/api/admin/competitors/${id}/extra-time`, body); await load(); } catch (err) { fail(err); } };
+    const tick = () => {
+      if (!t || !el.isConnected) return;
+      const leftSec = timerLeft(t, offset);
+      const [label, cls] = timerStatus(t, leftSec);
+      const big = $('#adm-count', el);
+      if (big) { big.textContent = t.status !== 'idle' && leftSec <= 0 ? 'Time is up' : fmtClock(Math.ceil(leftSec)); big.className = `countdown ${cls}`; }
+      const st = $('#adm-status', el);
+      if (st) st.innerHTML = pill({ state: cls, label });
+      for (const cell of $$('[data-ends]', el)) {
+        const l = leftSec + Number(cell.dataset.ends);
+        cell.textContent = t.status === 'idle' ? `${fmtClock(l)} (not started)` : l <= 0 ? 'Time is up' : fmtClock(Math.ceil(l));
+      }
+    };
+    const draw = () => {
+      el.innerHTML = `<div class="grid2">
+        <div class="card"><div class="spread"><h2 style="margin:0">${esc(t.title)}</h2><span id="adm-status"></span></div>
+          <div id="adm-count" class="countdown" style="font-size:56px;margin:8px 0 14px">--:--:--</div>
+          <div class="row">
+            ${t.status === 'running' ? '<button class="btn" data-act="pause">Pause</button>' : `<button class="btn primary" data-act="start">${t.status === 'paused' ? 'Resume' : 'Start'}</button>`}
+            <button class="btn" data-act="add5">+5 min everyone</button><button class="btn" data-act="sub5">−5 min everyone</button>
+            <button class="btn danger" data-act="reset">Reset</button></div>
+          <p class="small muted" style="margin-top:12px">Public screen (no login): <a href="/timer" target="_blank" rel="noopener" class="mono">${esc(state.platform.dashboardUrl)}/timer ↗</a></p></div>
+        <div class="card"><h2>Settings</h2><form id="timer-set">
+          <div class="field"><label>Title</label><input name="title" value="${esc(t.title)}" maxlength="120"></div>
+          <div class="field"><label>Duration (minutes)</label><input name="minutes" type="number" min="1" max="1440" value="${Math.round(t.durationSec / 60)}"></div>
+          <div class="row" style="margin-top:12px"><button class="btn primary" ${t.status === 'running' ? 'disabled' : ''}>Save</button>
+          <span class="small muted">${t.status === 'running' ? 'Pause or reset the timer to change the duration.' : t.status === 'paused' ? 'Saving keeps the paused time left; Reset applies the new duration.' : ''}</span></div></form></div>
+      </div>
+      <div class="card section"><h2>Extra time per competitor</h2>
+        <p class="small muted">Only this competitor's countdown is extended (shown on their dashboard and on the public screen).</p>
+        <div class="table-wrap"><table><thead><tr><th>Competitor</th><th>Extra time</th><th>Their time left</th><th></th></tr></thead><tbody>
+        ${t.competitors.map((c) => `<tr data-comp="${c.id}"><td><b>${esc(c.name)}</b></td>
+          <td>${c.extraSeconds ? `<span class="pill queued">+${Math.round(c.extraSeconds / 60)} min</span>` : '<span class="muted">—</span>'}</td>
+          <td class="mono" data-ends="${c.extraSeconds}"></td>
+          <td><div class="row" style="justify-content:flex-end"><button class="btn sm" data-x="5">+5 min</button><button class="btn sm" data-x="10">+10 min</button>
+            <button class="btn sm" data-x="custom">Other…</button>${c.extraSeconds ? '<button class="btn sm danger" data-x="clear">Clear</button>' : ''}</div></td></tr>`).join('')
+          || '<tr><td colspan="4" class="muted">No competitors yet.</td></tr>'}
+        </tbody></table></div></div>`;
+      tick();
+    };
+    const load = async () => { const sentAt = Date.now(); t = await api('GET', '/api/admin/timer'); offset = clockOffset(t, sentAt); if (el.isConnected) draw(); };
+    el.addEventListener('click', async (e) => {
+      const b = e.target.closest('[data-act]');
+      if (b) {
+        const a = b.dataset.act;
+        if (a === 'start' || a === 'pause') return act(a);
+        if (a === 'add5') return act('add', { minutes: 5 });
+        if (a === 'sub5') return act('add', { minutes: -5 });
+        if (a === 'reset') {
+          if (!confirm('Reset the timer to its full duration (not started)?')) return;
+          return act('reset', { clearExtra: confirm("Also clear ALL competitors' extra time?") });
+        }
+      }
+      const x = e.target.closest('[data-x]');
+      if (x) {
+        const id = x.closest('[data-comp]').dataset.comp;
+        if (x.dataset.x === 'clear') return extra(id, { clear: true });
+        let m = Number(x.dataset.x);
+        if (x.dataset.x === 'custom') {
+          const v = prompt('Minutes of extra time to add (use a negative number to remove):', '15');
+          if (v === null) return;
+          m = Number(v);
+          if (!Number.isFinite(m) || !m) return fail(new Error('Enter a number of minutes'));
+        }
+        return extra(id, { addMinutes: m });
+      }
+    });
+    el.addEventListener('submit', (e) => {
+      if (e.target.id !== 'timer-set') return;
+      e.preventDefault();
+      const f = new FormData(e.target);
+      act('set', { title: f.get('title'), minutes: Number(f.get('minutes')) }).then(() => toast('Timer saved'));
+    });
+    await load();
+    every(250, tick);
+    // refresh from the server, but never while the admin is typing in the settings form
+    every(3000, () => { const a = document.activeElement; if (!(a && el.contains(a) && a.tagName === 'INPUT')) load().catch(() => {}); });
+    return;
+  }
+
+  if (tab === 'locations') {
+    const LOC = [['floor', 'On the floor'], ['marking', 'In the marking room'], ['', 'Off duty']];
+    const draw = (list) => {
+      if (!el.isConnected) return;
+      const count = (l) => list.filter((t) => (t.location || '') === l).length;
+      el.innerHTML = `<div class="spread" style="margin-bottom:12px">
+        <span class="muted">${count('floor')} on the floor · ${count('marking')} in the marking room · ${count('')} off duty</span>
+        <a class="btn" href="/board" target="_blank" rel="noopener">Open public board ↗</a></div>
+        <div class="banner info" style="margin-bottom:12px">The public board <span class="mono">${esc(state.platform.dashboardUrl)}/board</span>
+          needs <b>no login</b> – put it on a screen in the room. It shows only trainer names and where they are.</div>
+        <div class="card table-wrap"><table><thead><tr><th>Trainer</th><th>Location</th><th>Since</th></tr></thead><tbody>
+        ${list.map((t) => `<tr data-trainer="${t.id}"><td><b>${esc(t.name)}</b></td>
+          <td><div class="row">${LOC.map(([v, label]) => `<button class="btn sm ${(t.location || '') === v ? 'primary' : ''}" data-loc="${v}">${label}</button>`).join('')}</div></td>
+          <td class="small muted">${t.since ? fmtTime(t.since) : '—'}</td></tr>`).join('') || '<tr><td colspan="3" class="muted">No trainer accounts yet – create them under Accounts.</td></tr>'}
+        </tbody></table></div>`;
+    };
+    const load = async () => draw(await api('GET', '/api/admin/trainers'));
+    el.addEventListener('click', async (e) => {
+      const b = e.target.closest('[data-loc]');
+      if (!b) return;
+      b.disabled = true;
+      try { await api('PUT', `/api/admin/trainers/${b.closest('[data-trainer]').dataset.trainer}/location`, { location: b.dataset.loc || null }); await load(); } catch (err) { fail(err); b.disabled = false; }
+    });
+    await load();
+    every(10000, () => load().catch(() => {}));
+    return;
+  }
 
   if (tab === 'templates') {
     const list = await api('GET', '/api/admin/templates');

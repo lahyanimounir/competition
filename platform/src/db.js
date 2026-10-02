@@ -132,6 +132,11 @@ if (!userCols.includes('git_pass_enc')) db.exec('ALTER TABLE users ADD COLUMN gi
 // Old competitor-level assessment mark (replaced by repo_assessments; columns kept, unused).
 if (!userCols.includes('assessed_at')) db.exec('ALTER TABLE users ADD COLUMN assessed_at TEXT');
 if (!userCols.includes('assessed_by')) db.exec('ALTER TABLE users ADD COLUMN assessed_by INTEGER');
+// Where a trainer is right now ('floor' | 'marking' | NULL = off duty), set by an administrator.
+if (!userCols.includes('location')) db.exec('ALTER TABLE users ADD COLUMN location TEXT');
+if (!userCols.includes('location_at')) db.exec('ALTER TABLE users ADD COLUMN location_at TEXT');
+// Extra time (seconds) an administrator gave this competitor on top of the shared timer.
+if (!userCols.includes('extra_seconds')) db.exec('ALTER TABLE users ADD COLUMN extra_seconds INTEGER NOT NULL DEFAULT 0');
 
 const norm = (params) => params.map((v) => (v === undefined ? null : typeof v === 'boolean' ? (v ? 1 : 0) : v));
 const plain = (row) => (row ? { ...row } : row);

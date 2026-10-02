@@ -9,6 +9,7 @@ const docker = require('./docker');
 const templates = require('./templates');
 const builder = require('./builder');
 const repos = require('./repos');
+const timer = require('./timer');
 const { now, httpError } = require('./util');
 
 const router = express.Router();
@@ -26,6 +27,25 @@ router.post('/login', wrap(async (req, res) => {
 }));
 
 router.post('/logout', (req, res) => { auth.logout(req, res); res.json({ ok: true }); });
+
+// ---- public (no login) -------------------------------------------------------
+
+const LOCATIONS = ['floor', 'marking'];
+const trainerBoard = () => q.all("SELECT id, name, location, location_at FROM users WHERE role = 'trainer' ORDER BY name")
+  .map((u) => ({ id: u.id, name: u.name, location: LOCATIONS.includes(u.location) ? u.location : null, since: u.location_at }));
+
+// Trainer locations for the public board (/board). Only names and locations - nothing else.
+router.get('/public/board', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ trainers: trainerBoard().map(({ name, location, since }) => ({ name, location, since })), now: now() });
+});
+
+// Competition timer for the public screen (/timer): the shared countdown plus the competitors who
+// received extra time (names and extra minutes only).
+router.get('/public/timer', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ ...timer.state(), extra: timer.competitorsWithExtra().map(({ name, extraSeconds }) => ({ name, extraSeconds })) });
+});
 
 router.use(auth.requireUser);
 
@@ -86,6 +106,7 @@ router.get('/dashboard', wrap(async (req, res) => {
   const list = q.all('SELECT * FROM repos WHERE user_id = ? ORDER BY created_at DESC', user.id);
   res.json({
     competitor: publicUser(user),
+    timer: { ...timer.state(), extraSeconds: user.extra_seconds || 0 },
     assessment: auth.isStaff(req.user) ? competitorAssessment(user.id, req.user.id) : undefined,
     git: { username: user.git_user, host: config.DASHBOARD_URL, passwordPending: !!(user.pending_secrets && JSON.parse(user.pending_secrets).gitPassword) },
     announcements: q.all('SELECT a.*, u.name AS author FROM announcements a LEFT JOIN users u ON u.id = a.author_id ORDER BY a.id DESC LIMIT 10'),
@@ -369,6 +390,39 @@ router.get('/admin/credentials', adminOnly, (req, res) => {
   }));
   audit(req.user.id, 'credentials.view', `${rows.length} accounts`);
   res.json(rows);
+});
+
+// Competition timer (administrators only)
+router.get('/admin/timer', adminOnly, (req, res) => {
+  res.json({
+    ...timer.state(),
+    competitors: q.all("SELECT id, name, extra_seconds AS extraSeconds FROM users WHERE role = 'competitor' ORDER BY name"),
+  });
+});
+
+router.post('/admin/timer/:action', adminOnly, (req, res) => {
+  const st = timer.control(req.params.action, req.body || {});
+  audit(req.user.id, `timer.${req.params.action}`, JSON.stringify(req.body || {}));
+  res.json(st);
+});
+
+router.put('/admin/competitors/:id/extra-time', adminOnly, (req, res) => {
+  const r = timer.setExtra(Number(req.params.id), req.body || {});
+  audit(req.user.id, 'timer.extra', `${r.name}: ${Math.round(r.extraSeconds / 60)} min extra`);
+  res.json(r);
+});
+
+// Trainer locations: on the floor / in the marking room / off duty (null)
+router.get('/admin/trainers', adminOnly, (req, res) => res.json(trainerBoard()));
+
+router.put('/admin/trainers/:id/location', adminOnly, (req, res) => {
+  const u = q.get("SELECT * FROM users WHERE id = ? AND role = 'trainer'", Number(req.params.id));
+  if (!u) throw httpError(404, 'Trainer not found');
+  const loc = req.body.location || null;
+  if (loc !== null && !LOCATIONS.includes(loc)) throw httpError(400, 'Location must be "floor", "marking" or null');
+  q.run('UPDATE users SET location = ?, location_at = ? WHERE id = ?', loc, loc ? now() : null, u.id);
+  audit(req.user.id, 'trainer.location', `${u.name} -> ${loc || 'off duty'}`);
+  res.json(trainerBoard().find((t) => t.id === u.id));
 });
 
 router.get('/admin/templates', adminOnly, (req, res) => res.json(templates.list()));

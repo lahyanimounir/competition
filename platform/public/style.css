@@ -161,3 +161,9 @@ tr.clickable:hover { background: var(--surface-2); }
   .ide { grid-template-columns: 1fr; grid-template-rows: 200px 1fr; }
   #topbar { gap: 10px; }
 }
+
+/* competition timer */
+.countdown { font-variant-numeric: tabular-nums; font-size: 40px; font-weight: 800; line-height: 1.1; }
+.countdown.queued { color: var(--warn); }
+.countdown.failed { color: var(--err); }
+.timer-card { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; }
